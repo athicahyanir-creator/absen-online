@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Absensi Online - Pemrograman Web</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,sans-serif;background:#f3f5f9;margin:0;color:#1d2433}
+header{background:#1e40af;color:#fff;padding:16px 20px}
+header h1{margin:0;font-size:1.2rem}
+header p{margin:2px 0 0;font-size:.85rem;opacity:.85}
+main{max-width:760px;margin:20px auto;padding:0 14px}
+.tabs{display:flex;gap:8px;margin-bottom:14px}
+.tabs button{flex:1;padding:10px;border:0;border-radius:8px;background:#dbe3f5;cursor:pointer;font-weight:600}
+.tabs button.on{background:#1e40af;color:#fff}
+.card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 1px 4px #0001;margin-bottom:14px}
+label{display:block;font-size:.85rem;margin:10px 0 4px;font-weight:600}
+input,select{width:100%;padding:10px;border:1px solid #c5cde0;border-radius:8px;font-size:1rem}
+.btn{margin-top:14px;padding:10px 16px;border:0;border-radius:8px;background:#1e40af;color:#fff;font-size:1rem;cursor:pointer}
+.btn.alt{background:#475569}
+.msg{margin-top:12px;padding:10px;border-radius:8px;font-size:.9rem}
+.ok{background:#dcfce7;color:#166534}.err{background:#fee2e2;color:#991b1b}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th,td{padding:8px;border-bottom:1px solid #e5e9f2;text-align:left}
+.hide{display:none}
+code{background:#eef;padding:2px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Absensi Online</h1>
+  <p>Mata Kuliah Pemrograman Web</p>
+</header>
+<main>
+  <div class="tabs">
+    <button id="tabMhs" class="on">Mahasiswa</button>
+    <button id="tabDsn">Dosen</button>
+  </div>
+
+  <!-- MAHASISWA -->
+  <section id="mhs" class="card">
+    <h3>Isi Kehadiran</h3>
+    <label>NIM</label><input id="nim" placeholder="contoh: 22312345">
+    <label>Nama Lengkap</label><input id="nama">
+    <label>Kode Sesi (dari dosen)</label><input id="kode" placeholder="contoh: PW-0710" style="text-transform:uppercase">
+    <button class="btn" id="btnHadir">Hadir</button>
+    <div id="msgMhs"></div>
+  </section>
+
+  <!-- DOSEN -->
+  <section id="dsn" class="hide">
+    <div id="loginBox" class="card">
+      <h3>Login Dosen</h3>
+      <label>Email</label><input id="email" type="email">
+      <label>Password</label><input id="pass" type="password">
+      <button class="btn" id="btnLogin">Masuk</button>
+      <div id="msgLogin"></div>
+    </div>
+
+    <div id="panel" class="hide">
+      <div class="card">
+        <h3>Buat Sesi Pertemuan</h3>
+        <label>Judul / Pertemuan</label><input id="judul" placeholder="Pertemuan 5 - JavaScript DOM">
+        <label>Kode Sesi</label><input id="kodeBaru" placeholder="PW-0710" style="text-transform:uppercase">
+        <button class="btn" id="btnBuat">Buat Sesi</button>
+        <button class="btn alt" id="btnKeluar">Logout</button>
+        <div id="msgBuat"></div>
+      </div>
+      <div class="card">
+        <h3>Rekap Kehadiran</h3>
+        <select id="pilihSesi"></select>
+        <button class="btn" id="btnToggle">Tutup/Buka Sesi</button>
+        <button class="btn alt" id="btnCsv">Unduh CSV</button>
+        <p id="jumlah"></p>
+        <table><thead><tr><th>NIM</th><th>Nama</th><th>Waktu</th></tr></thead><tbody id="rekap"></tbody></table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ====== ISI DENGAN DATA PROYEK SUPABASE KAMU ====== */
+const SUPABASE_URL = "https://pedciddmfyvqimhajodm.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_1i7o6q1-va0DcNG-gLsjnw_eYUPBVIf";
+/* ================================================== */
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = id => document.getElementById(id);
+const show = (el, text, ok) => { el.innerHTML = `<div class="msg ${ok?'ok':'err'}">${text}</div>`; };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let dataRekap = [];
+
+// Tab
+$("tabMhs").onclick = () => { $("mhs").classList.remove("hide"); $("dsn").classList.add("hide"); $("tabMhs").classList.add("on"); $("tabDsn").classList.remove("on"); };
+$("tabDsn").onclick = () => { $("dsn").classList.remove("hide"); $("mhs").classList.add("hide"); $("tabDsn").classList.add("on"); $("tabMhs").classList.remove("on"); cekSesi(); };
+
+// Mahasiswa: absen
+$("btnHadir").onclick = async () => {
+  const nim = $("nim").value.trim(), nama = $("nama").value.trim(), kode = $("kode").value.trim().toUpperCase();
+  if (!nim || !nama || !kode) return show($("msgMhs"), "Semua kolom wajib diisi.", false);
+  const { data: sesi } = await db.from("sesi").select("id,judul,aktif").eq("kode", kode).maybeSingle();
+  if (!sesi) return show($("msgMhs"), "Kode sesi tidak ditemukan.", false);
+  if (!sesi.aktif) return show($("msgMhs"), "Sesi sudah ditutup.", false);
+  const { error } = await db.from("absensi").insert({ sesi_id: sesi.id, nim, nama });
+  if (error) return show($("msgMhs"), error.code === "23505" ? "Kamu sudah absen di sesi ini." : "Gagal: " + esc(error.message), false);
+  show($("msgMhs"), `Absen berhasil: ${esc(sesi.judul)}`, true);
+};
+
+// Dosen: login
+async function cekSesi() {
+  const { data } = await db.auth.getSession();
+  const login = !!data.session;
+  $("loginBox").classList.toggle("hide", login);
+  $("panel").classList.toggle("hide", !login);
+  if (login) muatSesi();
+}
+$("btnLogin").onclick = async () => {
+  const { error } = await db.auth.signInWithPassword({ email: $("email").value, password: $("pass").value });
+  if (error) return show($("msgLogin"), "Login gagal: " + esc(error.message), false);
+  cekSesi();
+};
+$("btnKeluar").onclick = async () => { await db.auth.signOut(); cekSesi(); };
+
+// Dosen: buat sesi
+$("btnBuat").onclick = async () => {
+  const judul = $("judul").value.trim(), kode = $("kodeBaru").value.trim().toUpperCase();
+  if (!judul || !kode) return show($("msgBuat"), "Judul dan kode wajib diisi.", false);
+  const { error } = await db.from("sesi").insert({ judul, kode });
+  if (error) return show($("msgBuat"), "Gagal: " + esc(error.message), false);
+  show($("msgBuat"), "Sesi dibuat. Bagikan kode ke mahasiswa.", true);
+  muatSesi();
+};
+
+async function muatSesi() {
+  const { data } = await db.from("sesi").select("*").order("dibuat", { ascending: false });
+  $("pilihSesi").innerHTML = (data || []).map(s => `<option value="${s.id}" data-aktif="${s.aktif}">${esc(s.kode)} - ${esc(s.judul)} ${s.aktif ? "" : "(ditutup)"}</option>`).join("");
+  muatRekap();
+}
+$("pilihSesi").onchange = muatRekap;
+
+async function muatRekap() {
+  const id = $("pilihSesi").value;
+  if (!id) { $("rekap").innerHTML = ""; return; }
+  const { data } = await db.from("absensi").select("*").eq("sesi_id", id).order("waktu");
+  dataRekap = data || [];
+  $("jumlah").textContent = `Total hadir: ${dataRekap.length}`;
+  $("rekap").innerHTML = dataRekap.map(r => `<tr><td>${esc(r.nim)}</td><td>${esc(r.nama)}</td><td>${new Date(r.waktu).toLocaleString("id-ID")}</td></tr>`).join("");
+}
+
+$("btnToggle").onclick = async () => {
+  const opt = $("pilihSesi").selectedOptions[0];
+  if (!opt) return;
+  await db.from("sesi").update({ aktif: opt.dataset.aktif !== "true" }).eq("id", opt.value);
+  muatSesi();
+};
+
+$("btnCsv").onclick = () => {
+  const csv = "NIM,Nama,Waktu\n" + dataRekap.map(r => `"${r.nim}","${r.nama.replace(/"/g,'""')}","${r.waktu}"`).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = "rekap-absensi.csv";
+  a.click();
+};
+</script>
+</body>
+</html>
